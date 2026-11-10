@@ -1,0 +1,34 @@
+"use client";
+
+import Link from "next/link";
+import { useState } from "react";
+import { Board } from "@/components/board";
+import { Icon, PageHeading, Reveal } from "@/components/ui";
+import { endgameReport } from "@/lib/coachplan";
+import { moveNumber } from "@/lib/presentation";
+import type { BoardThemeName, ColorName, DrillView } from "@/lib/types";
+
+type Replay = { id: string; fen: string; opponent: string; youColor: ColorName | null; result: string; type: string | null; diff: number; playedAt: string | null; ply: number };
+const TYPE_TIPS: Record<string, string> = { pawn: "King activity decides pawn endings. Count tempi, know the opposition, and remember that a passed pawn is a goal, not a decoration.", rook: "Rook endings are the most common. Rook behind the passed pawn, king cut off, and active rook over material.", "minor piece": "Bishop vs knight: open positions favour the bishop; closed, blocked ones favour the knight. Put pawns on the colour your bishop doesn't control.", queen: "Queen endings reward checks and centralisation. Avoid perpetual check when ahead; seek it when behind.", "rook & minor": "Trade down into the ending you understand. Compare king positions before every exchange.", "queen & pieces": "This is a transition, not yet a pure ending. Keep your king safe and trade queens only when the resulting ending is better for you." };
+
+export function EndgamesDesk({ report, replay, drills, scopeLabel, theme }: { report: ReturnType<typeof endgameReport>; replay: Replay[]; drills: DrillView[]; scopeLabel: string; theme: BoardThemeName }) {
+  const [selected, setSelected] = useState<Replay | null>(replay[0] ?? null);
+  const worst = report.byType.filter(row => row.games >= 8).sort((a, b) => a.score - b.score)[0];
+  return <div>
+    <PageHeading eyebrow={`ENDGAMES · ${scopeLabel.toUpperCase()}`} title="How your games really end." description="Endgames are detected from material, not labels: the ply where queens are gone and little is left, or only two pieces remain. Numbers below use your results from that moment."/>
+    {report.reached ? <>
+      <div className="progress-stats">
+        {[{ title: "Games reaching an endgame", value: `${report.reachedShare}%`, help: `${report.reached} games` }, { title: "Score once in the endgame", value: `${report.endgameScore}%`, help: `vs ${report.middlegameScore}% when games end earlier` }, { title: "Converted when ahead", value: `${report.conversionRate}%`, help: `${report.converted} of ${report.ahead} with a material edge` }, { title: "Saved when behind", value: `${report.saveRate}%`, help: `${report.saved} of ${report.behind} draws or wins from worse` }].map(stat => <Reveal key={stat.title} className="progress-stat"><span>{stat.title}</span><strong>{stat.value}</strong><p>{stat.help}</p></Reveal>)}
+      </div>
+      <div className="insight-banner"><Icon name="bulb" size={24}/><div><h3>{report.conversionRate < 70 && report.ahead >= 10 ? "Converting is the lesson." : report.saveRate < 25 && report.behind >= 10 ? "Stubborn defence is the lesson." : "Your endgames are a strength—keep sharpening technique."}</h3><p>{worst ? `Your weakest ending type is the ${worst.label} ending (${worst.score}% in ${worst.games} games). ${TYPE_TIPS[worst.key] ?? ""}` : "Play a few more endgames and type-by-type advice appears here."}</p></div></div>
+      <div className="dash-grid two">
+        <Reveal className="card"><h2 className="card-title">By ending type</h2><table className="opening-table"><thead><tr><th>Type</th><th>Games</th><th>Score</th></tr></thead><tbody>{report.byType.map(row => <tr key={row.key}><td style={{ textTransform: "capitalize" }}>{row.label}</td><td>{row.games}</td><td className={row.score >= 52 ? "lime" : row.score < 46 ? "red" : ""}>{row.score}%</td></tr>)}</tbody></table><div className="divider"/><h3 className="card-title" style={{ fontSize: 14 }}>Level endgames</h3><p className="help">{report.level} roughly equal endings: {report.levelWon} won, {report.levelLost} lost. {report.levelLost > report.levelWon ? "You lose more equal endings than you win—technique and time management both matter here." : "You outplay opponents in equal endings. Good sign."}</p></Reveal>
+        <Reveal className="card" delay={.05}><h2 className="card-title">Replay an ending you didn't convert</h2><p className="help" style={{ marginBottom: 12 }}>Play it out against Stockfish from the moment the endgame began. The coach comments as you go.</p>
+          {selected ? <div className="replay-layout"><div className="replay-board"><Board fen={selected.fen} orientation={selected.youColor ?? "white"} theme={theme}/></div><div><strong>vs {selected.opponent}</strong><p className="help">{selected.type} ending from move {moveNumber(selected.ply)} · you were {selected.diff > 0 ? `up ${selected.diff}` : selected.diff < 0 ? `down ${-selected.diff}` : "level"} · result: {selected.result}</p><div className="row wrap" style={{ marginTop: 12 }}><Link href={`/play?fen=${encodeURIComponent(selected.fen)}&game=${selected.id}`} className="button primary small"><Icon name="play" size={13}/>Play it out</Link><Link href={`/review/${selected.id}`} className="button ghost small">Review the game</Link></div></div></div> : <p className="empty">No unconverted endings found. Nice.</p>}
+          <div className="replay-list" data-lenis-prevent>{replay.map(item => <button key={item.id} className={`queue-item ${selected?.id === item.id ? "active" : ""}`} onClick={() => setSelected(item)}><span className="game-avatar"><Icon name="trophy" size={15}/></span><span><strong>vs {item.opponent}</strong><p>{item.type} · {item.diff > 0 ? `+${item.diff}` : item.diff} material · {item.playedAt ? new Date(item.playedAt).toLocaleDateString() : ""}</p></span><span className={`badge ${item.result === "1/2-1/2" ? "amber" : "red"}`}>{item.result === "1/2-1/2" ? "Draw" : "Loss"}</span></button>)}</div>
+        </Reveal>
+      </div>
+      {drills.length ? <Reveal className="card"><div className="section-heading" style={{ margin: "0 0 12px" }}><h2><Icon name="target" size={16}/>Endgame positions from your analyzed games</h2><Link href="/practice?kind=endgame" className="text-button">Practice them <Icon name="arrow" size={12}/></Link></div><div className="mini-board-grid">{drills.map(drill => <Link key={drill.id} href="/practice?kind=endgame" className="mini-board-card"><Board fen={drill.fen} orientation={drill.fen.split(" ")[1] === "b" ? "black" : "white"} theme={theme}/><span>{drill.theme} · move {moveNumber(drill.ply)}</span></Link>)}</div></Reveal> : null}
+    </> : <div className="empty-state"><Icon name="trophy" size={36}/><h2>No endgames to measure yet.</h2><p>Link an account or import games. Endgame statistics are computed from the moves themselves, no engine needed.</p></div>}
+  </div>;
+}

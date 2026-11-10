@@ -1,0 +1,11 @@
+node_modules
+.next
+.vercel
+.git
+artifacts
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+/tmp

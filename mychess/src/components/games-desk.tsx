@@ -1,0 +1,41 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "motion/react";
+import { useEffect, useState } from "react";
+import { GameRow } from "@/components/game-row";
+import { useImport } from "@/components/import-dialog";
+import { Icon, PageHeading, useToast } from "@/components/ui";
+import { friendlyDate, gameAccuracy, resultTone, sourceLabel } from "@/lib/presentation";
+import { formatTimeControl, resultLabel } from "@/lib/pgn";
+import type { GameListItem } from "@/lib/types";
+
+export function GamesDesk({ items, total, page, pageSize, scopeLabel }: { items: GameListItem[]; total: number; page: number; pageSize: number; scopeLabel: string }) {
+  const router = useRouter(); const pathname = usePathname(); const params = useSearchParams(); const openImport = useImport(); const notify = useToast();
+  const [query, setQuery] = useState(params.get("q") ?? ""); const [view, setView] = useState<"grid" | "list">("grid"); const [selected, setSelected] = useState<string[]>([]);
+  const get = (key: string, fallback = "all") => params.get(key) ?? fallback;
+  function update(next: Record<string, string | null>) { const search = new URLSearchParams(params.toString()); for (const [key, value] of Object.entries(next)) { if (!value || value === "all") search.delete(key); else search.set(key, value); } if (!("page" in next)) search.delete("page"); router.push(`${pathname}?${search.toString()}`); }
+  useEffect(() => { const timer = setTimeout(() => { if ((params.get("q") ?? "") !== query) update({ q: query || null }); }, 350); return () => clearTimeout(timer); }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  async function queueSelected() { const response = await fetch("/api/analysis", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "queue", scope: "ids", ids: selected }) }); const json = await response.json(); notify(json.queued ? `${json.queued} game${json.queued === 1 ? "" : "s"} queued for Stockfish.` : "Those games are already analyzed or queued."); setSelected([]); router.refresh(); }
+  const chips = [["result", "win", "Wins"], ["result", "loss", "Losses"], ["result", "draw", "Draws"], ["status", "analyzed", "Analyzed"], ["status", "unread", "Not analyzed"], ["endgame", "yes", "Reached an endgame"]] as const;
+  return <div>
+    <PageHeading eyebrow={`GAME LIBRARY · ${scopeLabel.toUpperCase()}`} title={`${total.toLocaleString()} games, every one a lesson.`} description="Filter by result, opening, or time control. Select games to send them to Stockfish, or open any game for a plain-English review." action={<button className="button primary" onClick={openImport}><Icon name="plus" size={15}/>Import</button>}/>
+    <div className="library-toolbar">
+      <label className="search-field"><Icon name="search" size={16}/><input aria-label="Search games" placeholder="Opponent, opening, or event…" value={query} onChange={event => setQuery(event.target.value)}/>{query ? <button aria-label="Clear search" onClick={() => setQuery("")}><Icon name="close" size={14}/></button> : null}</label>
+      <select className="select" aria-label="Colour" value={get("color")} onChange={event => update({ color: event.target.value })}><option value="all">Both colours</option><option value="white">As White</option><option value="black">As Black</option></select>
+      <select className="select" aria-label="Time control" value={get("speed")} onChange={event => update({ speed: event.target.value })}><option value="all">All time controls</option><option value="bullet">Bullet</option><option value="blitz">Blitz</option><option value="rapid">Rapid</option><option value="classical">Classical</option><option value="daily">Daily</option></select>
+      <select className="select" aria-label="Sort" value={get("sort", "newest")} onChange={event => update({ sort: event.target.value })}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="accuracy">Highest accuracy</option></select>
+      <div className="segmented"><button aria-label="Grid view" aria-pressed={view === "grid"} onClick={() => setView("grid")}><Icon name="grid" size={15}/></button><button aria-label="List view" aria-pressed={view === "list"} onClick={() => setView("list")}><Icon name="list" size={15}/></button></div>
+    </div>
+    <div className="filter-chips">{chips.map(([key, value, label]) => <button key={`${key}${value}`} className={get(key) === value ? "active" : ""} onClick={() => update({ [key]: get(key) === value ? null : value })}>{label}</button>)}{params.get("opening") ? <button className="active" onClick={() => update({ opening: null })}>{params.get("opening")} <Icon name="close" size={11}/></button> : null}{[...params.keys()].length ? <button onClick={() => { setQuery(""); router.push(pathname); }}>Clear all</button> : null}</div>
+    <div className="row spread" style={{ marginBottom: 14 }}><p className="meta">Page {page} of {pages} · {total.toLocaleString()} games</p>{selected.length ? <div className="row"><span className="meta">{selected.length} selected</span><button className="button primary small" onClick={() => void queueSelected()}><Icon name="knight" size={13}/>Analyze with Stockfish</button><button className="button ghost small" onClick={() => setSelected([])}>Clear</button></div> : <span className="meta">Tick games to queue them for analysis</span>}</div>
+    {!items.length ? <div className="empty-state"><Icon name="archive" size={36}/><h2>No games here yet.</h2><p>Try another filter, or link an account to import your full history.</p><button className="button primary" onClick={openImport}>Import games</button></div> : view === "list" ? <div className="card library-list">{items.map(game => <GameRow key={game.id} game={game}/>)}</div> : <motion.div layout className="library-grid"><AnimatePresence mode="popLayout">{items.map(game => { const accuracy = gameAccuracy(game); const checked = selected.includes(game.id); return <motion.article layout key={game.id} className={`card game-card ${checked ? "selected" : ""}`} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2 }}>
+      <div className="game-card-top"><label className="select-box"><input type="checkbox" checked={checked} disabled={game.status === "analyzed"} onChange={event => setSelected(current => (event.target.checked ? [...current, game.id] : current.filter(id => id !== game.id)))} aria-label={`Select game against ${game.youColor === "white" ? game.blackName : game.whiteName}`}/></label><span className={`badge ${resultTone(game.result, game.youColor)}`}>{resultLabel(game.result, game.youColor)}</span><span className="badge">{game.speed ?? sourceLabel(game.source)}</span><Icon name="knight" size={85}/></div>
+      <div className="game-card-body"><h3>{game.openingFamily}</h3><p className="versus">{game.whiteName} <span className="muted">vs</span> {game.blackName}</p><div className="game-card-meta"><span>{friendlyDate(game.playedAt)}</span><span>{formatTimeControl(game.timeControl)}</span><span>{game.termination ? game.termination.replace(/^.* won - /, "").replace(/^.* by /, "") : ""}</span></div>
+      <div className="game-card-footer"><div><strong>{accuracy != null ? accuracy.toFixed(1) : "—"}</strong><small>{game.status === "analyzed" ? "accuracy" : game.platformAccuracy ? "Chess.com accuracy" : "not analyzed"}</small></div><Link className={`button small ${game.status === "analyzed" ? "secondary" : "primary"}`} href={`/review/${game.id}${game.status === "analyzed" ? "" : "?run=1"}`}>{game.status === "analyzed" ? "Open review" : "Analyze"}<Icon name="arrow" size={13}/></Link></div></div>
+    </motion.article>; })}</AnimatePresence></motion.div>}
+    {pages > 1 ? <div className="pagination"><button className="button ghost small" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>Previous</button><span className="meta">Page {page} / {pages}</span><button className="button ghost small" disabled={page >= pages} onClick={() => update({ page: String(page + 1) })}>Next</button></div> : null}
+  </div>;
+}
